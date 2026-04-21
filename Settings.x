@@ -144,6 +144,15 @@ extern NSBundle *YouPiPBundle();
     extern void ypdl_clear(void);
     extern NSString *const kYPDLEnabledKey;
 
+    // Forward-decl YTToastResponderEvent so the block selectors type-check.
+    // Class is resolved at runtime via NSClassFromString below.
+    @class YTToastResponderEvent_ForwardDecl;
+    typedef NSObject YTToastResponderEvent_ForwardDecl;
+    @protocol YPDLToastLike <NSObject>
+    + (instancetype)eventWithMessage:(NSString *)message firstResponder:(id)responder;
+    - (void)send;
+    @end
+
     YTSettingsSectionItem *debugToggle = [%c(YTSettingsSectionItem) switchItemWithTitle:@"Enable Debug Logging"
         titleDescription:@"Capture keychain / SSO / AVPiP activity to an on-device buffer."
         accessibilityIdentifier:nil
@@ -167,9 +176,9 @@ extern NSBundle *YouPiPBundle();
                 [UIPasteboard generalPasteboard].string = body;
                 msg = @"Log copied to clipboard";
             }
-            Class toast = NSClassFromString(@"YTToastResponderEvent");
+            Class<YPDLToastLike> toast = (Class<YPDLToastLike>)NSClassFromString(@"YTToastResponderEvent");
             if (toast) {
-                id e = [toast eventWithMessage:msg firstResponder:[self parentResponder]];
+                id<YPDLToastLike> e = [toast eventWithMessage:msg firstResponder:delegate];
                 [e send];
             }
             return YES;
@@ -181,9 +190,9 @@ extern NSBundle *YouPiPBundle();
         detailTextBlock:nil
         selectBlock:^BOOL (YTSettingsCell *cell, NSUInteger arg1) {
             ypdl_clear();
-            Class toast = NSClassFromString(@"YTToastResponderEvent");
+            Class<YPDLToastLike> toast = (Class<YPDLToastLike>)NSClassFromString(@"YTToastResponderEvent");
             if (toast) {
-                id e = [toast eventWithMessage:@"Log cleared" firstResponder:[self parentResponder]];
+                id<YPDLToastLike> e = [toast eventWithMessage:@"Log cleared" firstResponder:delegate];
                 [e send];
             }
             return YES;
