@@ -11,7 +11,7 @@ INSTALL_TARGET_PROCESSES = YouTube
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = YouPiP
-$(TWEAK_NAME)_FILES = Tweak.x Settings.x LegacyPiPCompat.x
+$(TWEAK_NAME)_FILES = Tweak.x Settings.x LegacyPiPCompat.x DebugLogger.x
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc
 $(TWEAK_NAME)_FRAMEWORKS = AVFoundation AVKit UIKit
 
