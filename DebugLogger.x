@@ -1,22 +1,24 @@
 // DebugLogger.x — passive observer embedded inside YouPiP.
 //
-// Self-contained: a small ring-buffer + os_log pipe, passive %orig hooks on keychain/SSO/AVPiP,
-// and a "Copy Log" button registered via YTVideoOverlay that dumps the buffer to UIPasteboard.
+// Self-contained ring-buffer + os_log pipe. Passive %orig hooks on keychain/SSO/AVPiP —
+// each one chains to the real implementation, only observing the return. No HUD, no
+// overlay button, no new settings section. The user-facing controls ("Enable Debug
+// Logging" + "Share Debug Log") are added to YouPiP's existing Settings.x section, not
+// here.
 //
-// No HUD. No settings section. No behavioral modifications — every hook calls %orig and only
-// observes the return value. Safe to pair with closed-source tweaks (YTLite) that already hook
-// the same classes; our hooks chain after theirs and log whatever they return.
-//
-// Added as part of xuninc's YouPiP fork so the dayanch build workflow picks up the logger
-// automatically when enable_youpip is true. No separate deb, no separate dylib — it travels
-// inside YouPiP.dylib, which is an expected-looking framework in a YouTube Plus install.
+// Why inside YouPiP? Dayanch's build workflow always pulls YouPiP (when enable_youpip
+// is true — the default), so our logger ships as part of an expected dylib instead of a
+// new-looking one. Safe to pair with closed-source tweaks that hook the same classes;
+// our hooks just observe whatever value they return.
 
 #import <UIKit/UIKit.h>
 #import <AVKit/AVKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <os/log.h>
 
-#pragma mark - Ring-buffer logger
+#pragma mark - Log ring buffer
+
+NSString *const kYPDLEnabledKey = @"ypdl_enabled";
 
 static NSMutableArray<NSString *> *ypdl_ring(void) {
     static NSMutableArray *r;
@@ -42,7 +44,12 @@ static NSDateFormatter *ypdl_fmt(void) {
     return f;
 }
 
+BOOL ypdl_enabled(void) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kYPDLEnabledKey];
+}
+
 static void ypdl_append(NSString *category, NSString *line) {
+    if (!ypdl_enabled()) return;
     NSString *stamp = [ypdl_fmt() stringFromDate:[NSDate date]];
     NSString *full = [NSString stringWithFormat:@"%@ [%@] %@", stamp, category ?: @"log", line];
     os_log(OS_LOG_DEFAULT, "[ypdl] %{public}s", full.UTF8String);
@@ -55,10 +62,16 @@ static void ypdl_append(NSString *category, NSString *line) {
 
 #define ypdl(cat, ...) ypdl_append(cat, [NSString stringWithFormat:__VA_ARGS__])
 
-static NSArray<NSString *> *ypdl_snapshot(void) {
+// Public — called from Settings.x to build the "Share Debug Log" pasteboard payload
+NSString *ypdl_snapshot_string(void) {
     __block NSArray *copy;
     dispatch_sync(ypdl_queue(), ^{ copy = [ypdl_ring() copy]; });
-    return copy;
+    return copy.count ? [copy componentsJoinedByString:@"\n"] : @"";
+}
+
+// Public — called from Settings.x to wipe the buffer
+void ypdl_clear(void) {
+    dispatch_async(ypdl_queue(), ^{ [ypdl_ring() removeAllObjects]; });
 }
 
 #pragma mark - Passive hooks: keychain / SSO
@@ -106,8 +119,7 @@ static NSArray<NSString *> *ypdl_snapshot(void) {
     return r;
 }
 - (void)startPictureInPicture {
-    ypdl(@"avpip", @"startPictureInPicture self=%p active=%@",
-         self, self.pictureInPictureActive ? @"YES" : @"NO");
+    ypdl(@"avpip", @"startPictureInPicture self=%p active=%@", self, self.pictureInPictureActive ? @"YES" : @"NO");
     %orig;
 }
 - (void)stopPictureInPicture {
@@ -122,89 +134,3 @@ static NSArray<NSString *> *ypdl_snapshot(void) {
     %orig;
 }
 %end
-
-#pragma mark - "Copy Log" overlay button (via YTVideoOverlay)
-
-static NSString *const kLogTweakID = @"DebugLog";
-
-@interface YTSettingsSectionItemManager : NSObject
-+ (void)registerTweak:(NSString *)tweakId metadata:(NSDictionary *)metadata;
-@end
-
-@interface YTToastResponderEvent : NSObject
-+ (instancetype)eventWithMessage:(NSString *)message firstResponder:(id)responder;
-- (void)send;
-@end
-
-@class YTQTMButton;
-@interface YTMainAppControlsOverlayView : UIView
-@property (retain, nonatomic) NSMutableDictionary<NSString *, YTQTMButton *> *overlayButtons;
-@end
-@interface YTInlinePlayerBarContainerView : UIView
-@property (retain, nonatomic) NSMutableDictionary<NSString *, YTQTMButton *> *overlayButtons;
-@end
-
-static UIImage *ypdl_icon(void) {
-    static UIImage *img;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        if (@available(iOS 13.0, *)) {
-            UIImage *base = [UIImage systemImageNamed:@"doc.on.clipboard"];
-            UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightRegular];
-            img = [base imageByApplyingSymbolConfiguration:cfg] ?: base;
-        }
-    });
-    return img;
-}
-
-static void ypdl_copy(UIView *fromView) {
-    NSArray *entries = ypdl_snapshot();
-    NSString *body = entries.count ? [entries componentsJoinedByString:@"\n"] : @"(empty)";
-    [UIPasteboard generalPasteboard].string = body;
-    ypdl(@"ui", @"copied %lu lines (%lu chars) to pasteboard",
-         (unsigned long)entries.count, (unsigned long)body.length);
-    Class toast = NSClassFromString(@"YTToastResponderEvent");
-    if (toast && fromView) {
-        id e = [toast eventWithMessage:@"Debug log copied" firstResponder:fromView];
-        [e send];
-    }
-}
-
-%hook YTMainAppControlsOverlayView
-- (UIImage *)buttonImage:(NSString *)tweakId {
-    if ([tweakId isEqualToString:kLogTweakID]) return ypdl_icon();
-    return %orig;
-}
-%new(v@:@)
-- (void)didPressCopyLog:(id)arg { ypdl_copy(self); }
-%end
-
-%hook YTInlinePlayerBarContainerView
-- (UIImage *)buttonImage:(NSString *)tweakId {
-    if ([tweakId isEqualToString:kLogTweakID]) return ypdl_icon();
-    return %orig;
-}
-%new(v@:@)
-- (void)didPressCopyLog:(id)arg { ypdl_copy(self); }
-%end
-
-#pragma mark - Registration ctor
-
-%ctor {
-    ypdl(@"ctor", @"ypdl loaded in %@ (exe=%@)",
-         [[NSBundle mainBundle] bundleIdentifier],
-         [[NSBundle mainBundle] executablePath].lastPathComponent);
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        Class mgr = NSClassFromString(@"YTSettingsSectionItemManager");
-        if ([mgr respondsToSelector:@selector(registerTweak:metadata:)]) {
-            [mgr registerTweak:kLogTweakID metadata:@{
-                @"accessibilityLabel": @"Copy Log",
-                @"selector": @"didPressCopyLog:",
-            }];
-            ypdl(@"ctor", @"registered CopyLog overlay button");
-        } else {
-            ypdl(@"ctor", @"YTVideoOverlay registerTweak: missing — button unavailable (use Console.app)");
-        }
-    });
-}

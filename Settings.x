@@ -137,6 +137,60 @@ extern NSBundle *YouPiPBundle();
             settingItemId:0];
         [sectionItems addObject:nonBackgroundable];
     }
+
+    // --- Debug Logger (embedded observer; rows at bottom of YouPiP section) ---
+    extern BOOL ypdl_enabled(void);
+    extern NSString *ypdl_snapshot_string(void);
+    extern void ypdl_clear(void);
+    extern NSString *const kYPDLEnabledKey;
+
+    YTSettingsSectionItem *debugToggle = [%c(YTSettingsSectionItem) switchItemWithTitle:@"Enable Debug Logging"
+        titleDescription:@"Capture keychain / SSO / AVPiP activity to an on-device buffer."
+        accessibilityIdentifier:nil
+        switchOn:ypdl_enabled()
+        switchBlock:^BOOL (YTSettingsCell *cell, BOOL enabled) {
+            [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kYPDLEnabledKey];
+            return YES;
+        }
+        settingItemId:0];
+    [sectionItems addObject:debugToggle];
+
+    YTSettingsSectionItem *shareLog = [%c(YTSettingsSectionItem) itemWithTitle:@"Share Debug Log"
+        accessibilityIdentifier:nil
+        detailTextBlock:nil
+        selectBlock:^BOOL (YTSettingsCell *cell, NSUInteger arg1) {
+            NSString *body = ypdl_snapshot_string();
+            NSString *msg;
+            if (body.length == 0) {
+                msg = @"Debug log is empty";
+            } else {
+                [UIPasteboard generalPasteboard].string = body;
+                msg = @"Log copied to clipboard";
+            }
+            Class toast = NSClassFromString(@"YTToastResponderEvent");
+            if (toast) {
+                id e = [toast eventWithMessage:msg firstResponder:[self parentResponder]];
+                [e send];
+            }
+            return YES;
+        }];
+    [sectionItems addObject:shareLog];
+
+    YTSettingsSectionItem *clearLog = [%c(YTSettingsSectionItem) itemWithTitle:@"Clear Debug Log"
+        accessibilityIdentifier:nil
+        detailTextBlock:nil
+        selectBlock:^BOOL (YTSettingsCell *cell, NSUInteger arg1) {
+            ypdl_clear();
+            Class toast = NSClassFromString(@"YTToastResponderEvent");
+            if (toast) {
+                id e = [toast eventWithMessage:@"Log cleared" firstResponder:[self parentResponder]];
+                [e send];
+            }
+            return YES;
+        }];
+    [sectionItems addObject:clearLog];
+    // --- end debug logger rows ---
+
     if ([delegate respondsToSelector:@selector(setSectionItems:forCategory:title:icon:titleDescription:headerHidden:)]) {
         YTIIcon *icon = [%c(YTIIcon) new];
         icon.iconType = YT_PICTURE_IN_PICTURE;
