@@ -15,6 +15,19 @@ static const NSInteger YouPiPSection = 200;
 - (void)updateYouPiPSectionWithEntry:(id)entry;
 @end
 
+// --- Debug Logger externs (defined in DebugLogger.x) ---
+extern BOOL ypdl_enabled(void);
+extern NSString *ypdl_snapshot_string(void);
+extern void ypdl_clear(void);
+extern NSString *const kYPDLEnabledKey;
+
+// Forward-decl YTToastResponderEvent selectors via a protocol so blocks type-check.
+// Class is resolved at runtime via NSClassFromString below.
+@protocol YPDLToastLike <NSObject>
++ (instancetype)eventWithMessage:(NSString *)message firstResponder:(id)responder;
+- (void)send;
+@end
+
 extern BOOL TweakEnabled();
 extern BOOL UsePiPButton();
 extern BOOL UseTabBarPiPButton();
@@ -139,20 +152,7 @@ extern NSBundle *YouPiPBundle();
     }
 
     // --- Debug Logger (embedded observer; rows at bottom of YouPiP section) ---
-    extern BOOL ypdl_enabled(void);
-    extern NSString *ypdl_snapshot_string(void);
-    extern void ypdl_clear(void);
-    extern NSString *const kYPDLEnabledKey;
-
-    // Forward-decl YTToastResponderEvent so the block selectors type-check.
-    // Class is resolved at runtime via NSClassFromString below.
-    @class YTToastResponderEvent_ForwardDecl;
-    typedef NSObject YTToastResponderEvent_ForwardDecl;
-    @protocol YPDLToastLike <NSObject>
-    + (instancetype)eventWithMessage:(NSString *)message firstResponder:(id)responder;
-    - (void)send;
-    @end
-
+    // (externs + YPDLToastLike protocol declared at file scope above)
     YTSettingsSectionItem *debugToggle = [%c(YTSettingsSectionItem) switchItemWithTitle:@"Enable Debug Logging"
         titleDescription:@"Capture keychain / SSO / AVPiP activity to an on-device buffer."
         accessibilityIdentifier:nil
